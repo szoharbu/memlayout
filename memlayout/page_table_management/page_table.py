@@ -1,15 +1,9 @@
 import random
 from typing import List, Dict, Optional, Tuple
 
-from Utils.configuration_management import Configuration, get_config_manager
-from Utils.logger_management import get_logger
-from Tool.state_management import get_current_state, get_state_manager
-
-from Tool.memory_management.memory_segments import MemoryRange
-from Tool.memory_management.memory_page import Page
-from Tool.memory_management import interval_lib
-from Tool.memory_management.utils import memory_log
-
+from memlayout.utils.logger_management import get_logger
+from memlayout.interval_lib.interval import Interval
+from memlayout.utils.enums import Page_sizes, Page_types, Execution_context
 
 class PageTableManager:
     '''
@@ -24,7 +18,7 @@ class PageTableManager:
     '''
 
 
-    def __init__(self, mmu_name: str, state_name: str, execution_context: Configuration.Execution_context ):
+    def __init__(self, mmu_name: str, state_name: str, execution_context: Execution_context ):
         """
         Initialize an MMU context.
         

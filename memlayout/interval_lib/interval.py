@@ -1,4 +1,4 @@
-
+from typing import Dict, Any, Optional, Tuple
 class Interval:
     """
     Represents a memory interval with metadata support.
