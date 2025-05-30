@@ -1,11 +1,12 @@
 import random
 from typing import List, Dict, Optional, Tuple
 
-from memlayout.utils.logger_management import get_logger
+from memlayout.utils.logger import get_logger
 from memlayout.interval_lib.interval import Interval
 from memlayout.utils.enums import Page_sizes, Page_types, Execution_context
+from memlayout.page_table_management.page import Page
 
-class PageTableManager:
+class PageTable:
     '''
     Represents a single MMU context with its own virtual address space.
     Each MMU is associated with a specific core, exception level, and security context.
@@ -168,33 +169,33 @@ class PageTableManager:
         
         return va_start, pa_start, size_bytes
 
-    def allocate_page(self, size:Configuration.Page_sizes=None, alignment_bits:int=None, page_type:Configuration.Page_types=None, permissions:int=None, cacheable:str=None, shareable:str=None, custom_attributes:dict=None, sequential_page_count:int=1, VA_eq_PA:bool=False):
+    def allocate_page(self, size:Page_sizes=None, alignment_bits:int=None, page_type:Page_types=None, permissions:int=None, cacheable:str=None, shareable:str=None, custom_attributes:dict=None, sequential_page_count:int=1, VA_eq_PA:bool=False):
         memory_log("")
         memory_log(f"======================== PageTableManager - allocate_page for '{self.mmu_name}' MMU")
         memory_log(f"==== size: {size}, alignment_bits: {alignment_bits}, page_type: {page_type}, permissions: {permissions}, cacheable: {cacheable}, shareable: {shareable}, custom_attributes: {custom_attributes}, sequential_page_count: {sequential_page_count}, VA_eq_PA: {VA_eq_PA}")
 
         if size is None:
-            size = random.choice([Configuration.Page_sizes.SIZE_4K, Configuration.Page_sizes.SIZE_2M])#, Configuration.Page_sizes.SIZE_1G])
+            size = random.choice([Page_sizes.SIZE_4K, Page_sizes.SIZE_2M])#, Configuration.Page_sizes.SIZE_1G])
         else:
-            if size not in [Configuration.Page_sizes.SIZE_4K, Configuration.Page_sizes.SIZE_2M]:#, Configuration.Page_sizes.SIZE_1G]:
+            if size not in [Page_sizes.SIZE_4K, Page_sizes.SIZE_2M]:#, Configuration.Page_sizes.SIZE_1G]:
                 raise ValueError(f"Size must be 4KB or 2MB. {size} is not valid. 1GB is still not supported.")
 
         #For a 4 KB page size, you need 12-bit alignment (i.e., addresses must be aligned to 2^12 bytes).
         #For a 2 MB page size, you need 21-bit alignment (i.e., addresses must be aligned to 2^21 bytes).
         #For a 1 GB page size, you need 30-bit alignment (i.e., addresses must be aligned to 2^30 bytes).
         if alignment_bits is None:
-            if size == Configuration.Page_sizes.SIZE_4K:
+            if size == Page_sizes.SIZE_4K:
                 alignment_bits = 12
-            elif size == Configuration.Page_sizes.SIZE_2M:
+            elif size == Page_sizes.SIZE_2M:
                 alignment_bits = 21
-            elif size == Configuration.ByteSize.SIZE_1G.in_bytes():
+            elif size == Page_sizes.SIZE_1G:
                 alignment_bits = 30
         else:
-            if size == Configuration.Page_sizes.SIZE_4K and alignment_bits < 12:
+            if size == Page_sizes.SIZE_4K and alignment_bits < 12:
                 raise ValueError(f"4KB page size requires at least 12-bit alignment. {alignment_bits} is not valid.")
-            elif size == Configuration.Page_sizes.SIZE_2M and alignment_bits < 21:
+            elif size == Page_sizes.SIZE_2M and alignment_bits < 21:
                 raise ValueError(f"2MB page size requires at least 21-bit alignment. {alignment_bits} is not valid.")
-            elif size == Configuration.Page_sizes.SIZE_1G and alignment_bits < 30:
+            elif size == Page_sizes.SIZE_1G and alignment_bits < 30:
                 raise ValueError(f"1GB page size requires at least 30-bit alignment. {alignment_bits} is not valid.")
 
         if page_type is None:
@@ -215,7 +216,7 @@ class PageTableManager:
             
         # Convert enum sizes to integers for interval operations
         # Explicit conversion to handle all possible cases
-        if isinstance(size, Configuration.Page_sizes):
+        if isinstance(size, Page_sizes):
             # Access the Enum value directly
             size_bytes = size.value
         else:
@@ -227,7 +228,7 @@ class PageTableManager:
             full_size_bytes = size_bytes
             
         # Get current state and memory space manager
-        from Tool.memory_management.memory_space_manager import get_mmu_manager
+        from memlayout.page_table_management.page_table_manager import get_mmu_manager
 
         mmu_manager = get_mmu_manager()
         current_state = get_current_state()
@@ -311,13 +312,13 @@ class PageTableManager:
         memory_log("======================== PageTableManager - allocate_cross_core_page")
 
         # from the cross_core_page all is hard-coded for now. TODO:: consider making it configurable in the future.
-        size = Configuration.Page_sizes.SIZE_2M # setting big space, as this pages can also be used for non-cross segments 
+        size = Page_sizes.SIZE_2M # setting big space, as this pages can also be used for non-cross segments 
 
-        if size == Configuration.Page_sizes.SIZE_4K:
+        if size == Page_sizes.SIZE_4K:
             alignment_bits = 12
-        elif size == Configuration.Page_sizes.SIZE_2M:
+        elif size == Page_sizes.SIZE_2M:
             alignment_bits = 21
-        elif size == Configuration.ByteSize.SIZE_1G.in_bytes():
+        elif size == Page_sizes.SIZE_1G:
             alignment_bits = 30
 
         page_type = Configuration.Page_types.TYPE_DATA
@@ -388,7 +389,7 @@ class PageTableManager:
         """Get all pages in this MMU."""
         return self.page_table_entries
     
-    def get_pages_by_type(self, page_type: Configuration.Page_types) -> List[Page]:
+    def get_pages_by_type(self, page_type: Page_types) -> List[Page]:
         """Get pages of a specific type."""
         return self.page_table_entries_by_type[page_type]
     
@@ -441,10 +442,10 @@ class PageTableManager:
             },
             "pages": {
                 "total": len(self.page_table_entries),
-                "code": len(self.page_table_entries_by_type[Configuration.Page_types.TYPE_CODE]),
-                "data": len(self.page_table_entries_by_type[Configuration.Page_types.TYPE_DATA]),
-                "device": len(self.page_table_entries_by_type[Configuration.Page_types.TYPE_DEVICE]),
-                "system": len(self.page_table_entries_by_type[Configuration.Page_types.TYPE_SYSTEM])
+                "code": len(self.page_table_entries_by_type[Page_types.TYPE_CODE]),
+                "data": len(self.page_table_entries_by_type[Page_types.TYPE_DATA]),
+                "device": len(self.page_table_entries_by_type[Page_types.TYPE_DEVICE]),
+                "system": len(self.page_table_entries_by_type[Page_types.TYPE_SYSTEM])
             }
         }
     

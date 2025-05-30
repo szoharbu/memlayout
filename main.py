@@ -15,9 +15,8 @@ def main():
     print("=" * 60)
     
     page_table_manager = get_page_table_manager()
-
-    # for core in ["core_0", "core_1"]:
-    #     page_table_manager.create_mmu(mmu_name=f"{core}_el1_NS", execution_context=Execution_context.EL1_NS)
+    for core in ["core_0", "core_1"]:
+        page_table_manager.create_mmu(mmu_name=f"{core}_el1_NS", execution_context=Execution_context.EL1_NS)
     
     print("✅ Successfully imported get_page_table_manager!")
     print("✅ Page table manager initialized!")

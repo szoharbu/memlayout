@@ -3,8 +3,10 @@ import random
 
 from memlayout.utils.singleton_management import SingletonManager
 from memlayout.utils.enums import Execution_context, Page_types
-
+from memlayout.utils.logger import get_logger
 from memlayout.page_table_management.page_table import PageTable
+from memlayout.utils.enums import ByteSize
+from memlayout.interval_lib.interval_lib import IntervalLib
 
 class MemoryAllocation:
     """Tracks information about a memory allocation"""
@@ -36,43 +38,41 @@ class PageTableManager:
         Initialize the MMU Manager with shared PA space..
         """
 
-        memory_log("")
-        memory_log("======================== MemorySpaceManager - init", "info")
+        logger = get_logger()
+        logger.info("")
+        logger.info("======================== MemorySpaceManager - init")
 
-        # TODO:: Need to extract the PA space from the configuration
-        self.pa_memory_range = MemoryRange(core="PA", 
-                                      address=Configuration.ByteSize.SIZE_2G.in_bytes() + Configuration.ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
-                                      byte_size=2 * Configuration.ByteSize.SIZE_4G.in_bytes())
-        
-        self.va_memory_range = MemoryRange(core="VA", 
-                                      address=Configuration.ByteSize.SIZE_2G.in_bytes() + Configuration.ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
-                                      byte_size=2 * Configuration.ByteSize.SIZE_4G.in_bytes())
+        pa_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
+        pa_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
+
+        va_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
+        va_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
 
 
         # Initialize interval trackers for PA
-        self.unmapped_pa_intervals = interval_lib.IntervalLib(
-            start_address=self.pa_memory_range.address, 
-            total_size=self.pa_memory_range.byte_size,
+        self.unmapped_pa_intervals = IntervalLib(
+            start_address=pa_memory_range_start_address, 
+            total_size=pa_memory_range_size,
             default_metadata={"state": "unmapped", "type": "pa"}
         )
-        self.mapped_pa_intervals = interval_lib.IntervalLib( # empty interval at start, and get filled when pages are mapped.
+        self.mapped_pa_intervals = IntervalLib( # empty interval at start, and get filled when pages are mapped.
             default_metadata={"state": "mapped", "type": "pa"}
         )
-        self.non_allocated_pa_intervals = interval_lib.IntervalLib(
+        self.non_allocated_pa_intervals = IntervalLib(
             default_metadata={"state": "non_allocated", "type": "pa"}  # empty interval at start, and get filled when pages are mapped.
         )
-        self.allocated_pa_intervals = interval_lib.IntervalLib( # empty interval at start, and get filled when segments are allocated.
+        self.allocated_pa_intervals = IntervalLib( # empty interval at start, and get filled when segments are allocated.
             default_metadata={"state": "allocated", "type": "pa"}
         )
 
         # MMU management
-        self.mmus: Dict[str, MMU] = {}  # mmu_name -> MMU 
-        self.core_mmus: Dict[str, List[str]] = {}  # core_id -> [mmu_names]
+        self.page_tables: Dict[str, PageTable] = {}  # page_table_name -> PageTable 
+        self.core_page_tables: Dict[str, List[str]] = {}  # core_id -> [page_table_names]
         
         # Track allocations for cross-page references
         self.allocations = []  # List of MemoryAllocation objects
         
-        memory_log("MMU Manager initialized")
+        logger.info("PageTableManager initialized")
     
 
     # MMU Management Methods
@@ -94,17 +94,17 @@ class PageTableManager:
         
         self.core_mmus[state.state_name].append(mmu_name)
         
-        memory_log("")
-        memory_log(f"================ MMUManager:: Created and registered MMU: {mmu_name} for core: {state.state_name}")
+        logger.info("")
+        logger.info(f"================ MMUManager:: Created and registered MMU: {mmu_name} for core: {state.state_name}")
         return mmu
     
-    def get_mmu(self, mmu_name: str) -> MMU:
+    def get_mmu(self, mmu_name: str) -> PageTable:
         """Get an MMU by ID."""
         if mmu_name not in self.mmus:
             raise ValueError(f"MMU {mmu_name} does not exist in MMUManager")
         return self.mmus.get(mmu_name)
     
-    def get_core_mmus(self, core_id: str) -> List[MMU]:
+    def get_core_mmus(self, core_id: str) -> List[PageTable]:
         """Get all MMUs for a specific core."""
         mmu_names = self.core_mmus.get(core_id, [])
         return [self.mmus[mmu_name] for mmu_name in mmu_names]
@@ -117,13 +117,13 @@ class PageTableManager:
     # Helper method to determine if a page type is code or data
     def _is_code_page_type(self, page_type):
         """Determine if a page type is code or data"""
-        if page_type in [Configuration.Page_types.TYPE_CODE]:
+        if page_type in [Page_types.TYPE_CODE]:
             return True
-        elif page_type in [Configuration.Page_types.TYPE_DATA, Configuration.Page_types.TYPE_DEVICE, Configuration.Page_types.TYPE_SYSTEM]:
+        elif page_type in [Page_types.TYPE_DATA, Page_types.TYPE_DEVICE, Page_types.TYPE_SYSTEM]:
             return False
         else:
             # Default to data for unknown types
-            memory_log(f"Unknown page type {page_type}, treating as data", "warning")
+            logger.warning(f"Unknown page type {page_type}, treating as data")
             return False
     
     # New operations for memory mapping and allocation
@@ -143,7 +143,7 @@ class PageTableManager:
         # # Ensure the state is initialized
         # self._initialize_state(state_name)
         
-        memory_log(f"Mapping VA:0x{va_addr:x} to PA:0x{pa_addr:x}, size:0x{size:x}, type:{page_type}")
+        logger.info(f"Mapping VA:0x{va_addr:x} to PA:0x{pa_addr:x}, size:0x{size:x}, type:{page_type}")
         
         # Update unmapped/mapped PA intervals
         self.unmapped_pa_intervals.remove_region(pa_addr, size)
@@ -165,14 +165,15 @@ class PageTableManager:
         
         :return: (va_start, pa_start, overlapping_pages)
         """
-        memory_log("Searching for matching VA and PA regions where VA=PA...")
+        logger = get_logger()
+        logger.info("Searching for matching VA and PA regions where VA=PA...")
         
         # Get the available regions for both VA and PA
         va_intervals = mmu.non_allocated_va_intervals.get_intervals(criteria={"page_type": page_type})
         pa_intervals = self.non_allocated_pa_intervals.get_intervals(criteria={"page_type": page_type})
         
         if len(va_intervals) == 0 or len(pa_intervals) == 0:
-            memory_log(f"No available {page_type} regions before allocation", level="error")
+            logger.error(f"No available {page_type} regions before allocation")
             raise ValueError(f"No available {page_type} regions before allocation")
         
         # memory_log(f"Available {page_type} VA regions before allocation:")
@@ -199,11 +200,11 @@ class PageTableManager:
                     overlap_size = overlap_end - overlap_start + 1
                     if overlap_size >= size:
                         # This overlapping region is big enough
-                        memory_log(f"Found matching region at 0x{overlap_start:x}, size: 0x{overlap_size:x}")
+                        logger.info(f"Found matching region at 0x{overlap_start:x}, size: 0x{overlap_size:x}")
                         matching_regions.append((overlap_start, overlap_size))
         
         if not matching_regions:
-            memory_log(f"Could not find any region where VA=PA is possible for size {size}", "error")
+            logger.error(f"Could not find any region where VA=PA is possible for size {size}")
             raise ValueError(f"Could not find any region where VA=PA is possible for size {size}")
         
         # Apply alignment if needed
@@ -220,13 +221,13 @@ class PageTableManager:
             aligned_regions = matching_regions
             
         if not aligned_regions:
-            memory_log(f"Could not find any aligned region where VA=PA is possible for size {size}", "error")
+            logger.error(f"Could not find any aligned region where VA=PA is possible for size {size}")
             raise ValueError(f"Could not find any aligned region where VA=PA is possible for size {size}")
             
         # Choose a random aligned region instead of always the first one
         if len(aligned_regions) > 1:
             chosen_idx = random.randrange(len(aligned_regions))
-            memory_log(f"Multiple regions available, randomly selected region {chosen_idx} of {len(aligned_regions)}")
+            logger.info(f"Multiple regions available, randomly selected region {chosen_idx} of {len(aligned_regions)}")
         else:
             chosen_idx = 0
             
@@ -242,19 +243,19 @@ class PageTableManager:
                 random_blocks = random.randrange(max_blocks + 1)
                 random_offset = random_blocks * alignment
                 va_start += random_offset
-                memory_log(f"Randomizing within region, chose offset 0x{random_offset:x} from base")
+                logger.info(f"Randomizing within region, chose offset 0x{random_offset:x} from base")
         else:
             # For unaligned allocations
             max_offset = region_size - size
             if max_offset > 0:
                 random_offset = random.randrange(max_offset + 1)
                 va_start += random_offset
-                memory_log(f"Randomizing within region, chose offset 0x{random_offset:x} from base")
+                logger.info(f"Randomizing within region, chose offset 0x{random_offset:x} from base")
         
         pa_start = va_start  # Since VA=PA
         va_end = va_start + size - 1
 
-        memory_log(f"Selected VA=PA region at address 0x{va_start:x}")
+        logger.info(f"Selected VA=PA region at address 0x{va_start:x}")
         
         # Now we need to check if this region is already mapped in the page tables
         # If it's not mapped, we'll need to create the mapping
@@ -268,13 +269,13 @@ class PageTableManager:
                 
                 # Check if the page has VA=PA mapping
                 if page.va != page.pa:
-                    memory_log(f"Existing page mapping doesn't satisfy VA=PA: VA=0x{page.va:x}, PA=0x{page.pa:x}", "error")
+                    logger.error(f"Existing page mapping doesn't satisfy VA=PA: VA=0x{page.va:x}, PA=0x{page.pa:x}")
                     raise ValueError(f"Existing page mapping doesn't satisfy VA=PA: VA=0x{page.va:x}, PA=0x{page.pa:x}")
         
         # If no existing pages cover this region, create the mapping
         if not overlapping_pages:
             # We need to create the mapping from scratch
-            memory_log(f"Creating new VA=PA mapping at 0x{va_start:x}")
+            logger.info(f"Creating new VA=PA mapping at 0x{va_start:x}")
             # Create pages as needed to cover the entire region
             current_va = va_start
             current_pa = pa_start
@@ -309,11 +310,12 @@ class PageTableManager:
         
         :return: (va_start, pa_start, overlapping_pages)
         """
+        logger = get_logger()
 
         intervals = mmu.non_allocated_va_intervals.get_intervals(criteria={"page_type": page_type})
-        memory_log(f"Looking for {page_type.value} region of size {size}. Available {len(intervals)} regions:")
+        logger.info(f"Looking for {page_type.value} region of size {size}. Available {len(intervals)} regions:")
         for i, interval in enumerate(intervals):
-            memory_log(f"  {page_type.value} region {i}: VA:0x{interval.start:x}-0x{interval.end:x}, size:0x{interval.size:x}")
+            logger.info(f"  {page_type.value} region {i}: VA:0x{interval.start:x}-0x{interval.end:x}, size:0x{interval.size:x}")
             
         # Find available non-allocated VA region from the relevent pool only, with alignment
         va_avail = mmu.non_allocated_va_intervals.find_region(size, alignment_bits)
@@ -321,13 +323,13 @@ class PageTableManager:
             raise ValueError(f"No available non-allocated {page_type.value} VA region of size {size} with alignment {alignment_bits} for MMU {mmu.mmu_name}")
         
         va_start, _ = va_avail
-        memory_log(f"Found suitable VA region starting at {hex(va_start)}")
+        logger.info(f"Found suitable VA region starting at {hex(va_start)}")
         
         # Check that the region is properly aligned
         if alignment_bits is not None:
             alignment = 1 << alignment_bits
             if va_start % alignment != 0:
-                memory_log(f"VA address 0x{va_start:x} is not aligned to {alignment_bits} bits!", "error")
+                logger.error(f"VA address 0x{va_start:x} is not aligned to {alignment_bits} bits!")
                 raise ValueError(f"Failed to allocate properly aligned memory. VA:0x{va_start:x} is not aligned to {alignment_bits} bits!")
         
         # Find the physical address that corresponds to the VA we just found
@@ -349,7 +351,7 @@ class PageTableManager:
         overlapping_pages.sort(key=lambda p: p.va)
         
         if overlapping_pages:
-            memory_log(f"Found {len(overlapping_pages)} pages overlapping with segment VA:{hex(va_start)}-{hex(va_end)}")
+            logger.info(f"Found {len(overlapping_pages)} pages overlapping with segment VA:{hex(va_start)}-{hex(va_end)}")
             
             # Check if pages are sequential without gaps
             is_sequential = True
@@ -362,7 +364,7 @@ class PageTableManager:
                 
                 # Check for a gap between pages
                 if prev_page.end_va + 1 != curr_page.va:
-                    memory_log(f"Gap detected between pages: {prev_page} and {curr_page}")
+                    logger.info(f"Gap detected between pages: {prev_page} and {curr_page}")
                     is_sequential = False
                     break
                 
@@ -372,7 +374,7 @@ class PageTableManager:
             
             # Verify the pages fully cover our segment
             if covered_range_start <= va_start and covered_range_end >= va_end and is_sequential:
-                memory_log(f"Pages provide complete sequential coverage for the segment")
+                logger.info(f"Pages provide complete sequential coverage for the segment")
                 
                 # Calculate the physical address for the start of our segment
                 # Find which page contains our VA start
@@ -387,13 +389,13 @@ class PageTableManager:
                     offset = va_start - containing_page.va
                     # Apply the same offset to get the correct PA
                     pa_start = containing_page.pa + offset
-                    memory_log(f"Found corresponding PA for VA:0x{va_start:x} -> PA:0x{pa_start:x} in page {containing_page}")
+                    logger.info(f"Found corresponding PA for VA:0x{va_start:x} -> PA:0x{pa_start:x} in page {containing_page}")
                     
                     # Verify PA alignment matches VA alignment
                     if alignment_bits is not None:
                         alignment = 1 << alignment_bits
                         if pa_start % alignment != 0:
-                            memory_log(f"PA address 0x{pa_start:x} is not aligned to {alignment_bits} bits!", "error")
+                            logger.error(f"PA address 0x{pa_start:x} is not aligned to {alignment_bits} bits!")
                             raise ValueError(f"Failed to allocate properly aligned memory. PA:0x{pa_start:x} is not aligned to {alignment_bits} bits!")
                     
                     # Verify physical addresses are sequential by checking each page boundary
@@ -407,25 +409,25 @@ class PageTableManager:
                             
                             # Check if next page's PA follows sequentially
                             if pa_at_boundary + 1 != next_page.pa:
-                                memory_log(f"Physical memory is not sequential between pages: "
-                                             f"PA 0x{pa_at_boundary:x} -> 0x{next_page.pa:x}", "warning")
+                                logger.warning(f"Physical memory is not sequential between pages: "
+                                             f"PA 0x{pa_at_boundary:x} -> 0x{next_page.pa:x}")
                                 # We'll continue anyway since VA is what matters for allocation
                 else:
-                    memory_log(f"Failed to find the specific page containing VA start 0x{va_start:x}", "error")
+                    logger.error(f"Failed to find the specific page containing VA start 0x{va_start:x}")
                     raise ValueError(f"Internal error: couldn't identify page containing VA start")
             else:
                 if not is_sequential:
-                    memory_log(f"Pages are not sequential, cannot allocate segment", "error")
+                    logger.error(f"Pages are not sequential, cannot allocate segment")
                 else:
-                    memory_log(f"Pages don't fully cover segment VA:0x{va_start:x}-0x{va_end:x}, "
-                               f"covered: 0x{covered_range_start:x}-0x{covered_range_end:x}", "error")
+                    logger.error(f"Pages don't fully cover segment VA:0x{va_start:x}-0x{va_end:x}, "
+                               f"covered: 0x{covered_range_start:x}-0x{covered_range_end:x}")
                 # Fall back to the error case below
                 overlapping_pages = []
                 
         if not overlapping_pages:
             # If we can't find the page entries (shouldn't happen with proper page management)
             # fall back to the original logic as a last resort
-            memory_log(f"CRITICAL ERROR: Cannot find pages covering VA:0x{va_start:x}-0x{va_end:x}. Page table may be inconsistent!", "error")
+            logger.error(f"CRITICAL ERROR: Cannot find pages covering VA:0x{va_start:x}-0x{va_end:x}. Page table may be inconsistent!")
             raise ValueError(f"CRITICAL ERROR: Cannot find pages covering VA:0x{va_start:x}-0x{va_end:x}. Page table may be inconsistent!")
             if is_code:
                 pa_avail = self.non_allocated_pa_code_intervals.find_region(size, alignment_bits)
@@ -436,9 +438,9 @@ class PageTableManager:
                 if not pa_avail:
                     raise ValueError(f"No available non-allocated DATA PA region of size {size} with alignment {alignment_bits}")
             pa_start, _ = pa_avail
-            memory_log(f"Using fallback PA allocation: 0x{pa_start:x}. THIS IS LIKELY INCORRECT!", "warning")
+            logger.warning(f"Using fallback PA allocation: 0x{pa_start:x}. THIS IS LIKELY INCORRECT!")
             
-        memory_log(f"Using PA region starting at 0x{pa_start:x}")
+        logger.info(f"Using PA region starting at 0x{pa_start:x}")
         
         return va_start, pa_start, overlapping_pages
 
@@ -458,7 +460,7 @@ class PageTableManager:
         :return: MemoryAllocation object
         """
         
-        memory_log(f"Allocating memory of size {size} for mmu '{mmu.mmu_name}' with page_type {page_type}, alignment_bits={alignment_bits}, VA_eq_PA={VA_eq_PA}")
+        logger.info(f"Allocating memory of size {size} for mmu '{mmu.mmu_name}' with page_type {page_type}, alignment_bits={alignment_bits}, VA_eq_PA={VA_eq_PA}")
         
         # Determine if we're allocating code or data
         is_code = self._is_code_page_type(page_type)
@@ -501,9 +503,9 @@ class PageTableManager:
         
         # Debug information
         if VA_eq_PA:
-            memory_log(f"Created VA=PA allocation: VA=PA=0x{va_start:x}, size={size}")
+            logger.info(f"Created VA=PA allocation: VA=PA=0x{va_start:x}, size={size}")
         else:
-            memory_log(f"Created allocation: VA=0x{va_start:x}, PA=0x{pa_start:x}, size={size}")
+            logger.info(f"Created allocation: VA=0x{va_start:x}, PA=0x{pa_start:x}, size={size}")
         
         self.allocations.append(allocation)
         return allocation
@@ -587,9 +589,9 @@ class PageTableManager:
         :param verbose: If True, prints more detailed information
         """
         state_manager = get_state_manager()
-        
-        memory_log("")
-        memory_log("==== MEMORY ALLOCATION SUMMARY ====")
+        logger = get_logger()
+        logger.info("")
+        logger.info("==== MEMORY ALLOCATION SUMMARY ====")
         
         # First, print summary of PA space
         total_pa_mapped = len(self.mapped_pa_intervals.free_intervals)
@@ -597,9 +599,9 @@ class PageTableManager:
         total_pa_code = len(self.mapped_pa_code_intervals.free_intervals)
         total_pa_data = len(self.mapped_pa_data_intervals.free_intervals)
         
-        memory_log(f"Physical Address Space:")
-        memory_log(f"  Total mapped regions: {total_pa_mapped} ({total_pa_code} code, {total_pa_data} data)")
-        memory_log(f"  Total allocated regions: {total_pa_allocated}")
+        logger.info(f"Physical Address Space:")
+        logger.info(f"  Total mapped regions: {total_pa_mapped} ({total_pa_code} code, {total_pa_data} data)")
+        logger.info(f"  Total allocated regions: {total_pa_allocated}")
         
         if verbose:
             # Print detailed PA intervals using utility function
@@ -609,7 +611,7 @@ class PageTableManager:
         # Then print per-state information
         for state_name, state in state_manager.states_dict.items():
             if state_name not in self.state_mapped_va_intervals:
-                memory_log(f"State {state_name}: No memory initialized")
+                logger.info(f"State {state_name}: No memory initialized")
                 continue
                 
             total_va_mapped = len(self.state_mapped_va_intervals[state_name].free_intervals)
@@ -617,15 +619,15 @@ class PageTableManager:
             total_va_code = len(self.state_mapped_va_code_intervals[state_name].free_intervals)
             total_va_data = len(self.state_mapped_va_data_intervals[state_name].free_intervals)
             
-            memory_log(f"\nState {state_name}:")
-            memory_log(f"  Virtual Address Space:")
-            memory_log(f"    Total mapped regions: {total_va_mapped} ({total_va_code} code, {total_va_data} data)")
-            memory_log(f"    Total allocated regions: {total_va_allocated}")
+            logger.info(f"\nState {state_name}:")
+            logger.info(f"  Virtual Address Space:")
+            logger.info(f"    Total mapped regions: {total_va_mapped} ({total_va_code} code, {total_va_data} data)")
+            logger.info(f"    Total allocated regions: {total_va_allocated}")
             
             # Get page table entries if available
             if hasattr(state, 'page_table_manager'):
                 page_table_entries = state.page_table_manager.get_page_table_entries()
-                memory_log(f"    Page Table Entries: {len(page_table_entries)}")
+                logger.info(f"    Page Table Entries: {len(page_table_entries)}")
                 
                 if verbose:
                     # Use utility function to print pages by type
@@ -638,12 +640,8 @@ class PageTableManager:
             # Use utility function to print allocations
             print_allocation_summary(state_allocations, "    ", verbose)
         
-        memory_log("==== END MEMORY SUMMARY ====")
+        logger.info("==== END MEMORY SUMMARY ====")
 
-    # def force_initialize_state(self, state_name):
-    #     """Force initialization of a specific state"""
-    #     memory_log(f"Force initializing state: {state_name}")
-    #     self._initialize_state(state_name)
 
 
 # Factory function to retrieve the MMUManager instance

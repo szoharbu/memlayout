@@ -17,10 +17,7 @@ class LogLevel(Enum):
     ERROR = logging.ERROR
 
 
-class SimpleLogger:
-    """
-    Simple logger that can replace print statements
-    """
+class Logger:
     
     def __init__(self, name: str = "memlayout"):
         self.logger = logging.getLogger(name)
@@ -42,7 +39,7 @@ class SimpleLogger:
         self.logger.error(message)
 
 
-def setup_logging(level: LogLevel = LogLevel.INFO, show_timestamp: bool = False) -> SimpleLogger:
+def setup_logging(level: LogLevel = LogLevel.INFO, show_timestamp: bool = False) -> Logger:
     """
     Setup basic logging configuration
     
@@ -76,10 +73,10 @@ def setup_logging(level: LogLevel = LogLevel.INFO, show_timestamp: bool = False)
     # Prevent propagation to avoid duplicate messages
     root_logger.propagate = False
     
-    return SimpleLogger("memlayout")
+    return Logger("memlayout")
 
 
-def get_logger(name: str = "memlayout") -> SimpleLogger:
+def get_logger(name: str = "memlayout") -> Logger:
     """
     Get a simple logger instance
     
@@ -89,14 +86,14 @@ def get_logger(name: str = "memlayout") -> SimpleLogger:
     Returns:
         SimpleLogger instance
     """
-    return SimpleLogger(name)
+    return Logger(name)
 
 
 # Default logger instance for easy use
-_default_logger: SimpleLogger = None
+_default_logger: Logger = None
 
 
-def get_default_logger() -> SimpleLogger:
+def get_default_logger() -> Logger:
     """Get the default logger instance, creating it if necessary"""
     global _default_logger
     if _default_logger is None:
