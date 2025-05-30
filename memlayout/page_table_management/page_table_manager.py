@@ -45,8 +45,8 @@ class PageTableManager:
         pa_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
         pa_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
 
-        va_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
-        va_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
+        # va_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
+        # va_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
 
 
         # Initialize interval trackers for PA
@@ -76,28 +76,29 @@ class PageTableManager:
     
 
     # MMU Management Methods
-    def create_mmu(self, mmu_name: str, execution_context:Execution_context) -> PageTable:
+    def create_page_table(self, page_table_name: str, core_id: str, execution_context:Execution_context) -> PageTable:
         
-        """Create and register a new MMU."""
-        if mmu_name in self.mmus:
-            raise ValueError(f"MMU {mmu_name} already exists")
+        """Create and register a new PageTable."""
+        if page_table_name in self.page_tables:
+            raise ValueError(f"PageTable {page_table_name} already exists")
 
-        state = get_current_state()
+        logger = get_logger()
+        logger.info(f"Creating PageTable: {page_table_name} for core: {core_id} with execution_context: {execution_context}")
 
-        mmu = MMU(mmu_name, state.state_name, execution_context)
-        state.enabled_mmus.append(mmu)
-        self.mmus[mmu_name] = mmu
+        page_table = PageTable(page_table_name, core_id, execution_context)
+        self.page_tables[page_table_name] = page_table
         
         # Initialize the core_mmus list if it doesn't exist
-        if state.state_name not in self.core_mmus:
-            self.core_mmus[state.state_name] = []
+        if core_id not in self.core_page_tables:
+            self.core_page_tables[core_id] = []
         
-        self.core_mmus[state.state_name].append(mmu_name)
+        self.core_page_tables[core_id].append(page_table_name)
         
         logger.info("")
-        logger.info(f"================ MMUManager:: Created and registered MMU: {mmu_name} for core: {state.state_name}")
-        return mmu
+        logger.info(f"================ PageTableManager:: Created and registered PageTable: {page_table_name} for core: {core_id}")
+        return page_table
     
+
     def get_mmu(self, mmu_name: str) -> PageTable:
         """Get an MMU by ID."""
         if mmu_name not in self.mmus:

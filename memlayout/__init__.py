@@ -11,3 +11,7 @@ from .utils.logger import setup_logging, get_logger, LogLevel, get_default_logge
 
 __version__ = "0.1.0"
 __all__ = ["Interval", "IntervalLib", "setup_logging", "get_logger", "LogLevel", "get_default_logger"]
+
+# Optional: Setup a default logger when package is imported
+# Uncomment the next line if you want automatic logging setup
+# _default_logger = setup_logging(level=LogLevel.INFO)

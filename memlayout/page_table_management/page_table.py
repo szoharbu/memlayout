@@ -2,8 +2,8 @@ import random
 from typing import List, Dict, Optional, Tuple
 
 from memlayout.utils.logger import get_logger
-from memlayout.interval_lib.interval import Interval
-from memlayout.utils.enums import Page_sizes, Page_types, Execution_context
+from memlayout.interval_lib.interval_lib import IntervalLib
+from memlayout.utils.enums import Page_sizes, Page_types, Execution_context, ByteSize
 from memlayout.page_table_management.page import Page
 
 class PageTable:
@@ -19,7 +19,7 @@ class PageTable:
     '''
 
 
-    def __init__(self, mmu_name: str, state_name: str, execution_context: Execution_context ):
+    def __init__(self, page_table_name: str, core_id: str, execution_context: Execution_context ):
         """
         Initialize an MMU context.
         
@@ -29,51 +29,51 @@ class PageTable:
             execution_context: Execution context (EL3, EL1_NS, EL1_S, EL2_NS, EL2_S, etc.)
         """
         logger = get_logger()
-        memory_log(f"==================== setting up MMU: {mmu_name} for {state_name} at {execution_context.value}", print_both=True)
+        logger.info(f"==================== setting up PageTable: {page_table_name} for {core_id} at {execution_context.value}")
 
-        self.mmu_name = mmu_name
-        self.state_name = state_name
+        self.page_table_name = page_table_name
+        self.core_id = core_id
         self.execution_context = execution_context
 
-        self.va_memory_range = MemoryRange(core="VA", address=Configuration.ByteSize.SIZE_2G.in_bytes() + Configuration.ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
-                                      byte_size=2 * Configuration.ByteSize.SIZE_4G.in_bytes())
+        va_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
+        va_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
 
         # VA space management - track unmapped, mapped, and allocated regions
-        self.unmapped_va_intervals = interval_lib.IntervalLib(
-            start_address=self.va_memory_range.address,
-            total_size=self.va_memory_range.byte_size,
-            default_metadata={"state": "unmapped", "type": "va", "mmu": mmu_name}
+        self.unmapped_va_intervals = IntervalLib(
+            start_address=va_memory_range_start_address,
+            total_size=va_memory_range_size,
+            default_metadata={"state": "unmapped", "type": "va", "page_table": page_table_name}
         )
         
-        self.mapped_va_intervals = interval_lib.IntervalLib(
-            default_metadata={"state": "mapped", "type": "va", "mmu": mmu_name}
+        self.mapped_va_intervals = IntervalLib(
+            default_metadata={"state": "mapped", "type": "va", "page_table": page_table_name}
         )
         
-        self.allocated_va_intervals = interval_lib.IntervalLib(
-            default_metadata={"state": "allocated", "type": "va", "mmu": mmu_name}
+        self.allocated_va_intervals = IntervalLib(
+            default_metadata={"state": "allocated", "type": "va", "page_table": page_table_name}
         )
         
-        self.non_allocated_va_intervals = interval_lib.IntervalLib(
-            default_metadata={"state": "non_allocated", "type": "va", "mmu": mmu_name}
+        self.non_allocated_va_intervals = IntervalLib(
+            default_metadata={"state": "non_allocated", "type": "va", "page_table": page_table_name}
         )
 
         # Page table entries for this MMU
         self.page_table_entries: List[Page] = []
         self.page_table_entries_by_type = {
-            Configuration.Page_types.TYPE_CODE: [],
-            Configuration.Page_types.TYPE_DATA: [],
-            Configuration.Page_types.TYPE_DEVICE: [],
-            Configuration.Page_types.TYPE_SYSTEM: []
+            Page_types.TYPE_CODE: [],
+            Page_types.TYPE_DATA: [],
+            Page_types.TYPE_DEVICE: [],
+            Page_types.TYPE_SYSTEM: []
         }
         
         # MMU-specific attributes and metadata
         self.attributes = {}
         
-        memory_log(f"Created MMU: {mmu_name} for {state_name} at {execution_context.value}")
+        logger.info(f"Created PageTable: {page_table_name} for {core_id} at {execution_context.value}")
 
 
     def __str__(self):
-        return f"MMU({self.mmu_name}, {self.state_name}, {self.execution_context.value})"
+        return f"PageTable({self.page_table_name}, {self.core_id}, {self.execution_context.value})"
 
     def _find_va_eq_pa_unmapped_region(self, mmu_manager, current_state, state_name, size_bytes, alignment_bits, page_type):
         """
