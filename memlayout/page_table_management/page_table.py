@@ -453,9 +453,8 @@ class PageTable:
         stats = self.get_memory_stats()
         logger.info(f"  Core: {stats['core_id']}")
         logger.info(f"  Execution Context: {stats['execution_context']}")
-        logger.info(f"  Pages: {stats['pages']['total']} total ({stats['pages']['code']} code, {stats['pages']['data']} data)")
+        logger.info(f"  Pages ({stats['pages']['total']} total, {stats['pages']['code']} code, {stats['pages']['data']} data):")
         
-        logger.info(f"======== pages:")
         for page in self.page_table_entries:
-            logger.info(f"Page: {page}")
+            logger.info(f"      Page: {page}")
     
