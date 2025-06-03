@@ -152,9 +152,11 @@ class Page:
             perms.append("W")
         if self.is_executable:
             perms.append("X")
-            
+        
+        is_va_eq_pa = self.va == self.pa
         return (f"Page(VA:0x{self.va:x}-0x{self.end_va:x}, "
                 f"PA:0x{self.pa:x}-0x{self.end_pa:x}, "
-                f"0x{self.size:x} bytes, {self.page_type}, "
-                f"{''.join(perms)}, {self.cacheable}, is_cross_core: {self.is_cross_core})")
+                f"Size:{hex(self.size)} bytes, "
+                f"{self.page_type}, {''.join(perms)}, {self.cacheable}, "
+                f"cross_core: {self.is_cross_core}, va_eq_pa: {is_va_eq_pa})")
 

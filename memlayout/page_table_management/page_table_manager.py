@@ -593,57 +593,62 @@ class PageTableManager:
         
         :param verbose: If True, prints more detailed information
         """
-        state_manager = get_state_manager()
         logger = get_logger()
         logger.info("")
         logger.info("==== MEMORY ALLOCATION SUMMARY ====")
         
-        # First, print summary of PA space
-        total_pa_mapped = len(self.mapped_pa_intervals.free_intervals)
-        total_pa_allocated = len(self.allocated_pa_intervals.free_intervals)
-        total_pa_code = len(self.mapped_pa_code_intervals.free_intervals)
-        total_pa_data = len(self.mapped_pa_data_intervals.free_intervals)
+
+        for page_table in self.get_all_page_tables():
+            page_table.print_summary()
+
+
+        # # First, print summary of PA space
+        # total_pa_mapped = len(self.mapped_pa_intervals.free_intervals)
+        # total_pa_allocated = len(self.allocated_pa_intervals.free_intervals)
+        # total_pa_code = len(self.mapped_pa_code_intervals.free_intervals)
+        # total_pa_data = len(self.mapped_pa_data_intervals.free_intervals)
         
-        logger.info(f"Physical Address Space:")
-        logger.info(f"  Total mapped regions: {total_pa_mapped} ({total_pa_code} code, {total_pa_data} data)")
-        logger.info(f"  Total allocated regions: {total_pa_allocated}")
+        # logger.info(f"Physical Address Space:")
+        # logger.info(f"  Total mapped regions: {total_pa_mapped} ({total_pa_code} code, {total_pa_data} data)")
+        # logger.info(f"  Total allocated regions: {total_pa_allocated}")
         
-        if verbose:
-            # Print detailed PA intervals using utility function
-            print_intervals_summary("Code", self.mapped_pa_code_intervals, verbose)
-            print_intervals_summary("Data", self.mapped_pa_data_intervals, verbose)
+        # if verbose:
+        #     # Print detailed PA intervals using utility function
+        #     print_intervals_summary("Code", self.mapped_pa_code_intervals, verbose)
+        #     print_intervals_summary("Data", self.mapped_pa_data_intervals, verbose)
         
-        # Then print per-state information
-        for state_name, state in state_manager.states_dict.items():
-            if state_name not in self.state_mapped_va_intervals:
-                logger.info(f"State {state_name}: No memory initialized")
-                continue
+        # # Then print per-state information
+        # for page_table in self.get_all_page_tables():
+        #     if page_table.execution_context not in self.state_mapped_va_intervals:
+        #         logger.info(f"State {page_table.execution_context}: No memory initialized")
+        #         continue
+            
                 
-            total_va_mapped = len(self.state_mapped_va_intervals[state_name].free_intervals)
-            total_va_allocated = len(self.state_allocated_va_intervals[state_name].free_intervals)
-            total_va_code = len(self.state_mapped_va_code_intervals[state_name].free_intervals)
-            total_va_data = len(self.state_mapped_va_data_intervals[state_name].free_intervals)
+        #     total_va_mapped = len(page_table.mapped_va_intervals.free_intervals)
+        #     total_va_allocated = len(page_table.allocated_va_intervals.free_intervals)
+        #     total_va_code = len(page_table.mapped_va_code_intervals.free_intervals)
+        #     total_va_data = len(page_table.mapped_va_data_intervals.free_intervals)
             
-            logger.info(f"\nState {state_name}:")
-            logger.info(f"  Virtual Address Space:")
-            logger.info(f"    Total mapped regions: {total_va_mapped} ({total_va_code} code, {total_va_data} data)")
-            logger.info(f"    Total allocated regions: {total_va_allocated}")
+        #     logger.info(f"\nCore {page_table.core_id} Page Table {page_table.page_table_name}:")
+        #     logger.info(f"  Virtual Address Space:")
+        #     logger.info(f"    Total mapped regions: {total_va_mapped} ({total_va_code} code, {total_va_data} data)")
+        #     logger.info(f"    Total allocated regions: {total_va_allocated}")
             
-            # Get page table entries if available
-            if hasattr(state, 'page_table_manager'):
-                page_table_entries = state.page_table_manager.get_page_table_entries()
-                logger.info(f"    Page Table Entries: {len(page_table_entries)}")
+        #     # Get page table entries if available
+        #     if hasattr(page_table, 'page_table_manager'):
+        #         page_table_entries = page_table.page_table_manager.get_page_table_entries()
+        #         logger.info(f"    Page Table Entries: {len(page_table_entries)}")
                 
-                if verbose:
-                    # Use utility function to print pages by type
-                    print_pages_by_type(page_table_entries, "    ", verbose)
+        #         if verbose:
+        #             # Use utility function to print pages by type
+        #             print_pages_by_type(page_table_entries, "    ", verbose)
             
-            # Print information about allocations in this state
-            state_allocations = [a for a in self.allocations 
-                               if self.state_allocated_va_intervals[state_name].is_region_available(a.va_start, a.size)]
+        #     # Print information about allocations in this state
+        #     state_allocations = [a for a in self.allocations 
+        #                        if self.state_allocated_va_intervals[state_name].is_region_available(a.va_start, a.size)]
             
-            # Use utility function to print allocations
-            print_allocation_summary(state_allocations, "    ", verbose)
+        #     # Use utility function to print allocations
+        #     print_allocation_summary(state_allocations, "    ", verbose)
         
         logger.info("==== END MEMORY SUMMARY ====")
 

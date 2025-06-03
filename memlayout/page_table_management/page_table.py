@@ -426,16 +426,16 @@ class PageTable:
         allocated_intervals = self.allocated_va_intervals.get_intervals()
         
         return {
-            "mmu_name": self.mmu_name,
-            "state_name": self.state_name,
+            "page_table_name": self.page_table_name,
+            "core_id": self.core_id,
             "execution_context": self.execution_context.value,
-            "va_space": {
-                "start": hex(self.va_memory_range.address),
-                "size": hex(self.va_memory_range.byte_size),
-                "unmapped_regions": len(unmapped_intervals),
-                "mapped_regions": len(mapped_intervals),
-                "allocated_regions": len(allocated_intervals)
-            },
+            # "va_space": {
+            #     "start": hex(self.va_memory_range_start_address),
+            #     "size": hex(self.va_memory_range_size),
+            #     "unmapped_regions": len(unmapped_intervals),
+            #     "mapped_regions": len(mapped_intervals),
+            #     "allocated_regions": len(allocated_intervals)
+            # },
             "pages": {
                 "total": len(self.page_table_entries),
                 "code": len(self.page_table_entries_by_type[Page_types.TYPE_CODE]),
@@ -447,31 +447,15 @@ class PageTable:
     
     def print_summary(self, verbose: bool = False):
         """Print a comprehensive summary of this MMU's state."""
+        logger = get_logger()
+        logger.info("")
+        logger.info(f"==== PageTableManager - print_summary for {self.page_table_name}")
         stats = self.get_memory_stats()
-        memory_log(f"\nMMU Summary: {self.mmu_name}")
-        memory_log(f"  State: {stats['state_name']}")
-        memory_log(f"  Execution Context: {stats['execution_context']}")
-        memory_log(f"  VA Space: {stats['va_space']['start']} - {stats['va_space']['size']}")
-        memory_log(f"  Unmapped Regions: {stats['va_space']['unmapped_regions']}")
-        memory_log(f"  Mapped Regions: {stats['va_space']['mapped_regions']}")
-        memory_log(f"  Allocated Regions: {stats['va_space']['allocated_regions']}")
-        memory_log(f"  Pages: {stats['pages']['total']} total ({stats['pages']['code']} code, {stats['pages']['data']} data)")
+        logger.info(f"  Core: {stats['core_id']}")
+        logger.info(f"  Execution Context: {stats['execution_context']}")
+        logger.info(f"  Pages: {stats['pages']['total']} total ({stats['pages']['code']} code, {stats['pages']['data']} data)")
         
-        if verbose:
-            memory_log(f"  Device Pages: {stats['pages']['device']}")
-            memory_log(f"  System Pages: {stats['pages']['system']}")
-            memory_log(f"  Attributes: {self.attributes}")
-            
-            # Show detailed interval information
-            memory_log(f"  Detailed VA Space:")
-            unmapped = self.unmapped_va_intervals.get_intervals()
-            for i, interval in enumerate(unmapped):
-                memory_log(f"    Unmapped {i}: 0x{interval.start:x}-0x{interval.start + interval.size - 1:x} (size: 0x{interval.size:x})")
-    
-    def print_page_tables(self):
-        current_state = get_current_state()
-        memory_log("")
-        memory_log(f"==================== PageTableManager - print_page_tables {current_state.state_name} - '{self.mmu_name}' MMU")
+        logger.info(f"======== pages:")
         for page in self.page_table_entries:
-            memory_log(f"Page: {page}")
+            logger.info(f"Page: {page}")
     
