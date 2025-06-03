@@ -35,7 +35,7 @@ class PageTable:
         self.core_id = core_id
         self.execution_context = execution_context
 
-        va_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
+        va_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes() # leaving 2MB for the MMU page table and constants
         va_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
 
         # VA space management - track unmapped, mapped, and allocated regions
@@ -75,21 +75,22 @@ class PageTable:
     def __str__(self):
         return f"PageTable({self.page_table_name}, {self.core_id}, {self.execution_context.value})"
 
-    def _find_va_eq_pa_unmapped_region(self, mmu_manager, current_state, state_name, size_bytes, alignment_bits, page_type):
+    def _find_va_eq_pa_unmapped_region(self, page_table_manager, size_bytes, alignment_bits, page_type):
         """
         Find a region that is available at the same address in both VA and PA unmapped spaces
         Uses randomization logic similar to IntervalLib.find_region
         
         Returns: (va_start, pa_start, size) - where va_start == pa_start
         """
-        memory_log(f"Searching for unmapped region where VA=PA is possible, size: {size_bytes}, alignment: {alignment_bits}")
+        logger = get_logger()
+        logger.info(f"Searching for unmapped region where VA=PA is possible, size: {size_bytes}, alignment: {alignment_bits}")
         
         # Get the unmapped VA and PA intervals
         #va_intervals = memory_space_manager.state_unmapped_va_intervals[state_name].free_intervals
         va_intervals = self.unmapped_va_intervals.get_intervals()
-        pa_intervals = mmu_manager.unmapped_pa_intervals.get_intervals()
+        pa_intervals = page_table_manager.unmapped_pa_intervals.get_intervals()
         
-        memory_log(f"Found {len(va_intervals)} unmapped VA regions and {len(pa_intervals)} unmapped PA regions")
+        logger.info(f"Found {len(va_intervals)} unmapped VA regions and {len(pa_intervals)} unmapped PA regions")
         
         # Find overlapping regions where VA can equal PA
         matching_regions = []
@@ -113,7 +114,7 @@ class PageTable:
                         matching_regions.append((overlap_start, overlap_size))
         
         if not matching_regions:
-            memory_log(f"Could not find any unmapped region where VA=PA is possible for size {size_bytes}", "error")
+            logger.error(f"Could not find any unmapped region where VA=PA is possible for size {size_bytes}")
             raise ValueError(f"Could not find any unmapped region where VA=PA is possible for size {size_bytes}")
         
         # Apply alignment and find suitable intervals (similar to find_region logic)
@@ -135,7 +136,7 @@ class PageTable:
                 suitable_intervals.append(((region_start, region_size), region_start, region_start + region_size - size_bytes))
                 
         if not suitable_intervals:
-            memory_log(f"Could not find any aligned unmapped region where VA=PA is possible for size {size_bytes}", "error")
+            logger.error(f"Could not find any aligned unmapped region where VA=PA is possible for size {size_bytes}")
             raise ValueError(f"Could not find any aligned unmapped region where VA=PA is possible for size {size_bytes}")
         
         # Randomize interval selection (similar to find_region)
@@ -165,14 +166,15 @@ class PageTable:
             va_start = random.randint(region_start, max_start)
         
         pa_start = va_start  # VA=PA constraint
-        memory_log(f"Selected VA=PA unmapped region at address 0x{va_start:x} (VA=PA), size: {size_bytes}")
+        logger.info(f"Selected VA=PA unmapped region at address 0x{va_start:x} (VA=PA), size: {size_bytes}")
         
         return va_start, pa_start, size_bytes
 
     def allocate_page(self, size:Page_sizes=None, alignment_bits:int=None, page_type:Page_types=None, permissions:int=None, cacheable:str=None, shareable:str=None, custom_attributes:dict=None, sequential_page_count:int=1, VA_eq_PA:bool=False):
-        memory_log("")
-        memory_log(f"======================== PageTableManager - allocate_page for '{self.mmu_name}' MMU")
-        memory_log(f"==== size: {size}, alignment_bits: {alignment_bits}, page_type: {page_type}, permissions: {permissions}, cacheable: {cacheable}, shareable: {shareable}, custom_attributes: {custom_attributes}, sequential_page_count: {sequential_page_count}, VA_eq_PA: {VA_eq_PA}")
+        logger = get_logger()
+        logger.info("")
+        logger.info(f"======================== PageTableManager - allocate_page for '{self.page_table_name}' PageTable")
+        logger.info(f"==== size: {size}, alignment_bits: {alignment_bits}, page_type: {page_type}, permissions: {permissions}, cacheable: {cacheable}, shareable: {shareable}, custom_attributes: {custom_attributes}, sequential_page_count: {sequential_page_count}, VA_eq_PA: {VA_eq_PA}")
 
         if size is None:
             size = random.choice([Page_sizes.SIZE_4K, Page_sizes.SIZE_2M])#, Configuration.Page_sizes.SIZE_1G])
@@ -228,22 +230,18 @@ class PageTable:
             full_size_bytes = size_bytes
             
         # Get current state and memory space manager
-        from memlayout.page_table_management.page_table_manager import get_mmu_manager
+        from memlayout.page_table_management.page_table_manager import get_page_table_manager
 
-        mmu_manager = get_mmu_manager()
-        current_state = get_current_state()
-        state_name = current_state.state_name
+        page_table_manager = get_page_table_manager()
         
         # Step 1: Find and allocate regions from unmapped space
         try:
             if VA_eq_PA:
-                memory_log(f"Allocating unmapped memory with VA=PA constraint, size: {full_size_bytes}, alignment: {alignment_bits}")
+                logger.info(f"Allocating unmapped memory with VA=PA constraint, size: {full_size_bytes}, alignment: {alignment_bits}")
                 
                 # Find a region that is available at the same address in both VA and PA unmapped spaces
                 va_start, pa_start, size = self._find_va_eq_pa_unmapped_region(
-                    mmu_manager, 
-                    current_state, 
-                    state_name, 
+                    page_table_manager, 
                     full_size_bytes, 
                     alignment_bits, 
                     page_type
@@ -253,29 +251,29 @@ class PageTable:
                 # First, update the unmapped intervals
                 # memory_space_manager.state_unmapped_va_intervals[state_name].remove_region(va_start, size)
                 self.unmapped_va_intervals.remove_region(va_start, size)
-                mmu_manager.unmapped_pa_intervals.remove_region(pa_start, size)
+                page_table_manager.unmapped_pa_intervals.remove_region(pa_start, size)
                 
                 # Map the VA to PA with equal addresses
-                mmu_manager.map_va_to_pa(self, va_start, pa_start, size, page_type)
+                page_table_manager.map_va_to_pa(self, va_start, pa_start, size, page_type)
                 
                 va_size = size
-                memory_log(f"Successfully allocated and mapped VA=PA memory at 0x{va_start:x}, size: {size}")
+                logger.info(f"Successfully allocated and mapped VA=PA memory at 0x{va_start:x}, size: {size}")
                 
             else:
                 # Original implementation for non-VA_eq_PA case
                 # Use the find_and_remove method which handles state initialization
                 va_start, va_size = self.unmapped_va_intervals.find_and_remove(full_size_bytes, alignment_bits)
                 
-                pa_allocation = mmu_manager.allocate_pa_interval(full_size_bytes, alignment_bits=alignment_bits)
+                pa_allocation = page_table_manager.allocate_pa_interval(full_size_bytes, alignment_bits=alignment_bits)
                 
                 pa_start, pa_size = pa_allocation
                 
                 # Step 2: Add the allocated regions to mapped pools
                 # First, add to mapped intervals pool, specifying the page type
-                mmu_manager.map_va_to_pa(self, va_start, pa_start, va_size, page_type)
+                page_table_manager.map_va_to_pa(self, va_start, pa_start, va_size, page_type)
                 
         except (ValueError, MemoryError) as e:
-            memory_log(f"Failed to allocate page memory: {e}", level="error")
+            logger.error(f"Failed to allocate page memory: {e}")
             raise ValueError(f"Could not allocate memory regions of size {full_size_bytes} with alignment {alignment_bits}")
         
         # Create the page objects for each page in the sequence
@@ -298,7 +296,7 @@ class PageTable:
             self.page_table_entries_by_type[page.page_type].append(page)
             result.append(page)
             
-            memory_log(f"Created page: {page}")
+            logger.info(f"Created page: {page}")
             
         # Return result based on sequential_page_count
         if sequential_page_count == 1:
@@ -308,8 +306,9 @@ class PageTable:
 
 
     def allocate_cross_core_page(self):
-        memory_log("")
-        memory_log("======================== PageTableManager - allocate_cross_core_page")
+        logger = get_logger()
+        logger.info("")
+        logger.info("======================== PageTableManager - allocate_cross_core_page")
 
         # from the cross_core_page all is hard-coded for now. TODO:: consider making it configurable in the future.
         size = Page_sizes.SIZE_2M # setting big space, as this pages can also be used for non-cross segments 
@@ -321,67 +320,64 @@ class PageTable:
         elif size == Page_sizes.SIZE_1G:
             alignment_bits = 30
 
-        page_type = Configuration.Page_types.TYPE_DATA
+        page_type = Page_types.TYPE_DATA
         permissions = Page.PERM_READ | Page.PERM_WRITE | Page.PERM_EXECUTE
         cacheable = Page.CACHE_WB
         shareable = Page.SHARE_NONE
         custom_attributes = {}
 
-        memory_log(f"==== size: {size}, alignment_bits: {alignment_bits}, page_type: {page_type}, permissions: {permissions}, cacheable: {cacheable}, shareable: {shareable}, custom_attributes: {custom_attributes}")
+        logger.info(f"==== size: {size}, alignment_bits: {alignment_bits}, page_type: {page_type}, permissions: {permissions}, cacheable: {cacheable}, shareable: {shareable}, custom_attributes: {custom_attributes}")
 
         size_bytes = size.value
 
         # Get current state and memory space manager
-        from Tool.memory_management.memory_space_manager import get_mmu_manager
-        mmu_manager = get_mmu_manager()
-        state_manager = get_state_manager()
+        from memlayout.page_table_management.page_table_manager import get_page_table_manager
+        page_table_manager = get_page_table_manager()
 
         
         try:
               # Step 1: Find and allocate regions from unmapped space
-            pa_allocation = mmu_manager.allocate_pa_interval(size_bytes, alignment_bits=alignment_bits)
+            pa_allocation = page_table_manager.allocate_pa_interval(size_bytes, alignment_bits=alignment_bits)
             pa_start, pa_size = pa_allocation
 
-            orig_state = state_manager.get_active_state()
-            for state_name in state_manager.get_all_states():
-                state_manager.set_active_state(state_name)
-                curr_state = state_manager.get_active_state()
 
-                core_mmus = mmu_manager.get_core_mmus(state_name)
-                print(f"core_mmus for {state_name}: {core_mmus}")
-                for mmu in core_mmus:
 
-                    va_start, va_size = mmu.unmapped_va_intervals.find_and_remove(size_bytes, alignment_bits)
-                    
-                    # Step 2: Add the allocated regions to mapped pools
-                    # First, add to mapped intervals pool, specifying the page type
-                    mmu_manager.map_va_to_pa(mmu, va_start, pa_start, va_size, page_type)
-                    
-                    # Create the page objects for each page in the sequence
-                    page = Page(
-                        va=va_start, 
-                        pa=pa_start, 
-                        size=size_bytes, 
-                        page_type=page_type, 
-                        permissions=permissions, 
-                        cacheable=cacheable, 
-                        shareable=shareable, 
-                        execution_context=mmu.execution_context, 
-                        custom_attributes=custom_attributes,
-                        is_cross_core=True
-                    )
+            orig_state_name = self.core_id
+            all_page_tables = page_table_manager.get_all_page_tables()
+            
+            for page_table in all_page_tables:
+                logger.info(f"core_page_tables for {page_table.core_id}: {page_table.page_table_name}")
 
-                    # Add to our tracking collections
-                    mmu.page_table_entries.append(page)
-                    mmu.page_table_entries_by_type[page.page_type].append(page)
-                    
-                    
-                    memory_log(f"Created Cross-Core page {curr_state.state_name}:{mmu.mmu_name} - {page}")
+                va_start, va_size = page_table.unmapped_va_intervals.find_and_remove(size_bytes, alignment_bits)
+                
+                # Step 2: Add the allocated regions to mapped pools
+                # First, add to mapped intervals pool, specifying the page type
+                page_table_manager.map_va_to_pa(page_table, va_start, pa_start, va_size, page_type)
+                
+                # Create the page objects for each page in the sequence
+                page = Page(
+                    va=va_start, 
+                    pa=pa_start, 
+                    size=size_bytes, 
+                    page_type=page_type, 
+                    permissions=permissions, 
+                    cacheable=cacheable, 
+                    shareable=shareable, 
+                    execution_context=page_table.execution_context, 
+                    custom_attributes=custom_attributes,
+                    is_cross_core=True
+                )
 
-            state_manager.set_active_state(orig_state.state_name)
+                # Add to our tracking collections
+                page_table.page_table_entries.append(page)
+                page_table.page_table_entries_by_type[page.page_type].append(page)
+                
+                
+                logger.info(f"Created Cross-Core page {page_table.core_id}:{page_table.page_table_name} - {page}")
+
 
         except (ValueError, MemoryError) as e:
-            memory_log(f"Failed to allocate page memory: {e}", level="error")
+            logger.error(f"Failed to allocate page memory: {e}")
             raise ValueError(f"Could not allocate memory regions of size {size} with alignment {alignment_bits}")
         
     

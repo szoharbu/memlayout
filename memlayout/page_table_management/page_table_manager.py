@@ -42,7 +42,7 @@ class PageTableManager:
         logger.info("")
         logger.info("======================== MemorySpaceManager - init")
 
-        pa_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
+        pa_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes() # leaving 2MB for the MMU page table and constants
         pa_memory_range_size = 2 * ByteSize.SIZE_4G.in_bytes()
 
         # va_memory_range_start_address = ByteSize.SIZE_2G.in_bytes() + ByteSize.SIZE_2M.in_bytes(), # leaving 2MB for the MMU page table and constants
@@ -99,16 +99,20 @@ class PageTableManager:
         return page_table
     
 
-    def get_mmu(self, mmu_name: str) -> PageTable:
+    def get_page_table(self, page_table_name: str) -> PageTable:
         """Get an MMU by ID."""
-        if mmu_name not in self.mmus:
-            raise ValueError(f"MMU {mmu_name} does not exist in MMUManager")
-        return self.mmus.get(mmu_name)
+        if page_table_name not in self.page_tables:
+            raise ValueError(f"PageTable {page_table_name} does not exist in PageTableManager")
+        return self.page_tables.get(page_table_name)
     
-    def get_core_mmus(self, core_id: str) -> List[PageTable]:
+    def get_all_page_tables(self) -> List[PageTable]:
+        """Get all page tables."""
+        return list(self.page_tables.values())
+    
+    def get_core_page_tables(self, core_id: str) -> List[PageTable]:
         """Get all MMUs for a specific core."""
-        mmu_names = self.core_mmus.get(core_id, [])
-        return [self.mmus[mmu_name] for mmu_name in mmu_names]
+        page_table_names = self.core_page_tables.get(core_id, [])
+        return [self.page_tables[page_table_name] for page_table_name in page_table_names]
 
     # Physical Address Management
     def allocate_pa_interval(self, size: int, alignment_bits: int = None) -> Tuple[int, int]:
@@ -128,13 +132,13 @@ class PageTableManager:
             return False
     
     # New operations for memory mapping and allocation
-    def map_va_to_pa(self, mmu, va_addr, pa_addr, size, page_type):
+    def map_va_to_pa(self, page_table, va_addr, pa_addr, size, page_type):
         """
         Maps a VA region to a PA region
         - Moves the region from unmapped to mapped and non-allocated
         - Does not allocate the memory
         
-        :param mmu_name: MMU name
+        :param page_table_name: PageTable name
         :param va_addr: Virtual address to map
         :param pa_addr: Physical address to map
         :param size: Size of region in bytes
@@ -143,24 +147,24 @@ class PageTableManager:
         """
         # # Ensure the state is initialized
         # self._initialize_state(state_name)
-        
+        logger = get_logger()
         logger.info(f"Mapping VA:0x{va_addr:x} to PA:0x{pa_addr:x}, size:0x{size:x}, type:{page_type}")
         
         # Update unmapped/mapped PA intervals
         self.unmapped_pa_intervals.remove_region(pa_addr, size)
         self.mapped_pa_intervals.add_region(pa_addr, size)
-        self.non_allocated_pa_intervals.add_region(pa_addr, size, metadata={"page_type": page_type, "mmu": mmu.mmu_name})  # Newly mapped memory is non-allocated
+        self.non_allocated_pa_intervals.add_region(pa_addr, size, metadata={"page_type": page_type, "page_table": page_table.page_table_name})  # Newly mapped memory is non-allocated
 
         # Update unmapped/mapped VA intervals for the MMU
-        mmu.unmapped_va_intervals.remove_region(va_addr, size)
-        mmu.mapped_va_intervals.add_region(va_addr, size)
-        mmu.non_allocated_va_intervals.add_region(va_addr, size, metadata={"page_type": page_type})
+        page_table.unmapped_va_intervals.remove_region(va_addr, size)
+        page_table.mapped_va_intervals.add_region(va_addr, size)
+        page_table.non_allocated_va_intervals.add_region(va_addr, size, metadata={"page_type": page_type})
                             
         # Record the mapping
         return (va_addr, pa_addr, size)
     
 
-    def _find_va_eq_pa_addresses(self, mmu, size, page_type, alignment_bits=None, page_size=4096):
+    def _find_va_eq_pa_addresses(self, page_table, size, page_type, alignment_bits=None, page_size=4096):
         """
         Find VA and PA addresses that satisfy the VA=PA constraint
         
@@ -170,7 +174,7 @@ class PageTableManager:
         logger.info("Searching for matching VA and PA regions where VA=PA...")
         
         # Get the available regions for both VA and PA
-        va_intervals = mmu.non_allocated_va_intervals.get_intervals(criteria={"page_type": page_type})
+        va_intervals = page_table.non_allocated_va_intervals.get_intervals(criteria={"page_type": page_type})
         pa_intervals = self.non_allocated_pa_intervals.get_intervals(criteria={"page_type": page_type})
         
         if len(va_intervals) == 0 or len(pa_intervals) == 0:

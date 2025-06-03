@@ -25,15 +25,16 @@ def main():
     for core in ["core_0", "core_1"]:
         el3r = page_table_manager.create_page_table(page_table_name=f"{core}_el3_root", core_id=core, execution_context=Execution_context.EL3)
 
-        # #Always allocate a code page table that has a VA=PA mapping, needed for BSP boot block
-        # el3r.allocate_page(size=Page_sizes.SIZE_2M, page_type=Page_types.TYPE_CODE, sequential_page_count=1, VA_eq_PA=True)
+        #Always allocate a code page table that has a VA=PA mapping, needed for BSP boot block
+        el3r.allocate_page(size=Page_sizes.SIZE_2M, page_type=Page_types.TYPE_CODE, sequential_page_count=1, VA_eq_PA=True)
 
-        # for type in [Page_types.TYPE_CODE, Page_types.TYPE_DATA]:
-        #     count = random.randint(6, 8)
-        #     for _ in range(count):
-        #         sequential_page_count = choice(values={1:90, 2:9, 3:1})
-        #         size = random.choice([Page_sizes.SIZE_4K, Page_sizes.SIZE_2M])
-        #         el3r.allocate_page(size=size, page_type=type, sequential_page_count=sequential_page_count)
+        for type in [Page_types.TYPE_CODE, Page_types.TYPE_DATA]:
+            count = random.randint(6, 8)
+            for _ in range(count):
+                #sequential_page_count = choice(values={1:90, 2:9, 3:1})
+                sequential_page_count = random.choices(population=[1, 2, 3], weights=[90, 9, 1], k=1)
+                size = random.choice([Page_sizes.SIZE_4K, Page_sizes.SIZE_2M])
+                el3r.allocate_page(size=size, page_type=type, sequential_page_count=sequential_page_count[0])
 
 
     
