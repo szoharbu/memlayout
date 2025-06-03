@@ -1,10 +1,13 @@
 import random
 from abc import ABC
-from Tool.asm_blocks import DataUnit, AsmUnit
-from Utils.configuration_management import Configuration
-from Tool.asm_libraries.label import Label
-from Tool.memory_management import interval_lib
-from Tool.memory_management.memory_block import MemoryBlock
+from memlayout.utils.logger import get_logger
+from memlayout.utils.enums import Memory_types
+
+# from Tool.asm_blocks import DataUnit, AsmUnit
+# from Utils.configuration_management import Configuration
+# from Tool.asm_libraries.label import Label
+# from Tool.memory_management import interval_lib
+# from Tool.memory_management.memory_block import MemoryBlock
 
 # Abstract base class for MemorySegment
 class MemorySegment(ABC):
@@ -12,7 +15,7 @@ class MemorySegment(ABC):
     # generate incremental memory_segment_unique_id
     _memory_segment_initial_seed_id = random.randint(1234, 5678)  # start at a random label
 
-    def __init__(self, name: str, mmu, address: int, pa_address: int, byte_size: int, memory_type:Configuration.Memory_types):
+    def __init__(self, name: str, mmu, address: int, pa_address: int, byte_size: int, memory_type:Memory_types):
         """
         Initialize a segment from a memory block.
         :param name: segment name.
@@ -44,7 +47,7 @@ class MemorySegment(ABC):
 
 # CodeSegment inherits from MemorySegment and adds a start_label attribute
 class CodeSegment(MemorySegment):
-    def __init__(self, name: str, mmu, address: int, pa_address: int, byte_size: int, memory_type:Configuration.Memory_types):
+    def __init__(self, name: str, mmu, address: int, pa_address: int, byte_size: int, memory_type:Memory_types):
         super().__init__(name, mmu, address, pa_address, byte_size, memory_type)
         self.code_label = Label(postfix=f"{name}_code_segment")
 
@@ -56,7 +59,7 @@ class CodeSegment(MemorySegment):
 
 # DataSegment inherits from MemorySegment and may add more data-specific attributes
 class DataSegment(MemorySegment):
-    def __init__(self, name: str, mmu, address: int, pa_address: int, byte_size: int, memory_type:Configuration.Memory_types, init_value: str=None, is_cross_core:bool=False):
+    def __init__(self, name: str, mmu, address: int, pa_address: int, byte_size: int, memory_type:Memory_types, init_value: str=None, is_cross_core:bool=False):
         super().__init__(name, mmu, address, pa_address, byte_size, memory_type)
         self.init_value = init_value  # Example of additional attribute
 
@@ -65,19 +68,12 @@ class DataSegment(MemorySegment):
         self.memory_block_list:list[MemoryBlock] = []
         self.is_cross_core = is_cross_core
 
-        if is_cross_core and memory_type != Configuration.Memory_types.DATA_PRESERVE:
+        if is_cross_core and memory_type != Memory_types.DATA_PRESERVE:
             raise ValueError(f"Cross-core segments must be of type DATA_PRESERVE, but got {memory_type}")
 
-        if memory_type == Configuration.Memory_types.DATA_PRESERVE:
+        if memory_type == Memory_types.DATA_PRESERVE:
             # Initially, the entire block is free
             self.interval_tracker = interval_lib.IntervalLib(start_address=address, total_size=byte_size)
 
-# Each Core get allocated with a memory-range, to be used for code and data allocations. initial size is 2G per core.
-# each memory-range maintains internal interval-list, and have a preserve base-reg to work with.
-class MemoryRange:
-    def __init__(self, core: str, address: int, byte_size: int):
-        # Initially, the entire block is
-        self.address = address
-        self.byte_size = byte_size
-        self.base_reg = None # will be set later and can be modified during the test
+
 

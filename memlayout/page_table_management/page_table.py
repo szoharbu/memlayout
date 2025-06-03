@@ -5,6 +5,7 @@ from memlayout.utils.logger import get_logger
 from memlayout.interval_lib.interval_lib import IntervalLib
 from memlayout.utils.enums import Page_sizes, Page_types, Execution_context, ByteSize
 from memlayout.page_table_management.page import Page
+from memlayout.segment_management.segment_manager import SegmentManager
 
 class PageTable:
     '''
@@ -69,6 +70,9 @@ class PageTable:
         # MMU-specific attributes and metadata
         self.attributes = {}
         
+        # Segment manager for this page table
+        self.segment_manager = SegmentManager(page_table=self)
+
         logger.info(f"Created PageTable: {page_table_name} for {core_id} at {execution_context.value}")
 
 

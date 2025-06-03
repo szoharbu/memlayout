@@ -7,7 +7,7 @@ This demonstrates the core interval allocation functionality.
 
 import random
 from memlayout.page_table_management.page_table_manager import get_page_table_manager
-from memlayout.utils.enums import Execution_context, Page_sizes, Page_types
+from memlayout.utils.enums import Execution_context, Page_sizes, Page_types, Memory_types
 from memlayout.utils.logger import setup_logging, LogLevel, get_logger
 
 
@@ -50,8 +50,7 @@ def init_segments():
 
     core_0_el3_page_table = next(page_table for page_table in page_tables if page_table.core_id == "core_0" and page_table.execution_context == Execution_context.EL3)
     # Allocate BSP boot segment. a single segment that act as trampoline for all cores
-    bsp_boot_segment = core_0_el3_page_table.allocate_memory_segment(page_table=core_0_el3_page_table,
-                                                                    name=f"BSP__boot_segment", 
+    bsp_boot_segment = core_0_el3_page_table.segment_manager.allocate_memory_segment(name=f"BSP__boot_segment", 
                                                                     byte_size=0x200,
                                                                     memory_type=Memory_types.BSP_BOOT_CODE, 
                                                                     alignment_bits=4, 
