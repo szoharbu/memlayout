@@ -173,139 +173,93 @@ class PageTableManager:
         logger = get_logger()
         logger.info("Searching for matching VA and PA regions where VA=PA...")
         
+        pages = page_table.get_pages()
+        va_eq_pa_pages = []
+        for page in pages:
+            if page.va == page.pa:
+                va_eq_pa_pages.append(page)
+        logger.info(f"Found {len(va_eq_pa_pages)} pages that satisfy VA=PA")
+        selected_page = random.choice(va_eq_pa_pages)
+        logger.info(f"Selected page: {selected_page}")
+        
         # Get the available regions for both VA and PA
-        va_intervals = page_table.non_allocated_va_intervals.get_intervals(criteria={"page_type": page_type})
-        pa_intervals = self.non_allocated_pa_intervals.get_intervals(criteria={"page_type": page_type})
+        all_va_intervals = page_table.non_allocated_va_intervals.get_intervals(criteria={"page_type": page_type})
         
-        if len(va_intervals) == 0 or len(pa_intervals) == 0:
-            logger.error(f"No available {page_type} regions before allocation")
-            raise ValueError(f"No available {page_type} regions before allocation")
+        # Find intervals that overlap with the selected VA=PA page and create intersections
+        # Since we're in a VA=PA page, VA and PA intervals are identical, so we only need to check VA
+        suitable_intervals = []
         
-        # memory_log(f"Available {page_type} VA regions before allocation:")
-        # for i, interval in enumerate(va_intervals):
-        #     memory_log(f"  {page_type} region {i}: VA:{hex(interval.start)}-{hex(interval.end)}, size:0x{interval.size:x}, metadata: {interval.metadata}")
-
-        # memory_log(f"Available {page_type} PA regions before allocation:")
-        # for i, interval in enumerate(pa_intervals):
-        #     memory_log(f"  {page_type} region {i}: PA:{hex(interval.start)}-{hex(interval.end)}, size:0x{interval.size:x}, metadata: {interval.metadata}")
-
-        # Find overlapping regions where VA can equal PA
-        matching_regions = []
-        for va_interval in va_intervals:
-            for pa_interval in pa_intervals:
+        for interval in all_va_intervals:
+            # Check if interval overlaps with the page at all
+            if interval.start < selected_page.end_va + 1 and (interval.start + interval.size) > selected_page.va:
+                # Calculate the intersection of the interval with the page
+                intersection_start = max(interval.start, selected_page.va)
+                intersection_end = min(interval.start + interval.size - 1, selected_page.end_va)
+                intersection_size = intersection_end - intersection_start + 1
                 
-                # Calculate the intersection of the VA and PA intervals
-                # For VA=PA, we need addresses that are available in both spaces
-                overlap_start = max(va_interval.start, pa_interval.start)
-                # Use inclusive end addresses (end - 1) for proper overlap calculation
-                overlap_end = min(va_interval.start + va_interval.size - 1, pa_interval.start + pa_interval.size - 1)
-                
-                if overlap_start <= overlap_end:
-                    # There is an overlap
-                    overlap_size = overlap_end - overlap_start + 1
-                    if overlap_size >= size:
-                        # This overlapping region is big enough
-                        logger.info(f"Found matching region at 0x{overlap_start:x}, size: 0x{overlap_size:x}")
-                        matching_regions.append((overlap_start, overlap_size))
+                # Check if the intersection is large enough for our allocation
+                if intersection_size >= size:
+                    # Create a new interval representing the intersection
+                    from memlayout.interval_lib.interval_lib import Interval
+                    intersection_interval = Interval(intersection_start, intersection_size, interval.metadata)
+                    suitable_intervals.append(intersection_interval)
+                    logger.info(f"Found suitable intersection: 0x{intersection_start:x}-0x{intersection_end:x} (size: 0x{intersection_size:x}) from interval 0x{interval.start:x}-0x{interval.start + interval.size - 1:x}")
+                else:
+                    logger.info(f"Intersection too small: 0x{intersection_start:x}-0x{intersection_end:x} (size: 0x{intersection_size:x}) < required 0x{size:x}")
+            # else:
+            #     memory_log(f"No overlap: interval 0x{interval.start:x}-0x{interval.start + interval.size - 1:x} with page 0x{selected_page.va:x}-0x{selected_page.end_va:x}")
         
-        if not matching_regions:
-            logger.error(f"Could not find any region where VA=PA is possible for size {size}")
-            raise ValueError(f"Could not find any region where VA=PA is possible for size {size}")
+        if len(suitable_intervals) == 0:
+            logger.error(f"No available {page_type} regions inside VA=PA page that fit size {size}")
+            raise ValueError(f"No available {page_type} regions inside VA=PA page that fit size {size}")
         
-        # Apply alignment if needed
-        aligned_regions = []
+        # Select one suitable interval (could be random or first)
+        selected_interval = random.choice(suitable_intervals)
+        logger.info(f"Selected interval inside VA=PA page: {hex(selected_interval.start)}-{hex(selected_interval.start + selected_interval.size - 1)}, size: 0x{selected_interval.size:x}")
+        
+        # Apply alignment and find position within the selected interval
         if alignment_bits is not None:
             alignment = 1 << alignment_bits
-            for region_start, region_size in matching_regions:
-                # Calculate the aligned start address
-                aligned_start = (region_start + alignment - 1) & ~(alignment - 1)
-                if aligned_start + size <= region_start + region_size:
-                    # The aligned region fits
-                    aligned_regions.append((aligned_start, region_size - (aligned_start - region_start)))
-        else:
-            aligned_regions = matching_regions
+            # Find the first aligned address within the interval
+            aligned_start = (selected_interval.start + alignment - 1) & ~(alignment - 1)
             
-        if not aligned_regions:
-            logger.error(f"Could not find any aligned region where VA=PA is possible for size {size}")
-            raise ValueError(f"Could not find any aligned region where VA=PA is possible for size {size}")
+            # Check if the aligned allocation fits within the interval
+            if aligned_start + size > selected_interval.start + selected_interval.size:
+                logger.error(f"Aligned allocation doesn't fit in interval")
+                raise ValueError(f"Cannot fit aligned allocation of size {size} with alignment {alignment_bits} bits in selected interval")
             
-        # Choose a random aligned region instead of always the first one
-        if len(aligned_regions) > 1:
-            chosen_idx = random.randrange(len(aligned_regions))
-            logger.info(f"Multiple regions available, randomly selected region {chosen_idx} of {len(aligned_regions)}")
-        else:
-            chosen_idx = 0
+            # Randomize position within the aligned possibilities
+            max_aligned_offset = ((selected_interval.start + selected_interval.size - size) & ~(alignment - 1)) - aligned_start
+            if max_aligned_offset > 0:
+                # Calculate how many aligned positions are possible
+                num_positions = (max_aligned_offset // alignment) + 1
+                random_position = random.randrange(num_positions)
+                random_offset = random_position * alignment
+                aligned_start += random_offset
+                logger.info(f"Randomized aligned position: offset 0x{random_offset:x} from first aligned address")
             
-        va_start, region_size = aligned_regions[chosen_idx]
-        
-        # Additionally, randomize the position within the chosen region
-        if alignment_bits is not None:
-            alignment = 1 << alignment_bits
-            # Calculate how many alignment-sized blocks fit in the region
-            max_blocks = (region_size - size) // alignment
-            if max_blocks > 0:
-                # Choose random aligned position
-                random_blocks = random.randrange(max_blocks + 1)
-                random_offset = random_blocks * alignment
-                va_start += random_offset
-                logger.info(f"Randomizing within region, chose offset 0x{random_offset:x} from base")
+            va_start = pa_start = aligned_start
         else:
-            # For unaligned allocations
-            max_offset = region_size - size
+            # No alignment required, randomize position within interval
+            max_offset = selected_interval.size - size
             if max_offset > 0:
                 random_offset = random.randrange(max_offset + 1)
-                va_start += random_offset
-                logger.info(f"Randomizing within region, chose offset 0x{random_offset:x} from base")
+                va_start = pa_start = selected_interval.start + random_offset
+                logger.info(f"Randomized position: offset 0x{random_offset:x} from interval start")
+            else:
+                va_start = pa_start = selected_interval.start
         
-        pa_start = va_start  # Since VA=PA
         va_end = va_start + size - 1
 
-        logger.info(f"Selected VA=PA region at address 0x{va_start:x}")
+        # print(f"va_start: {hex(va_start)}, va_end: {hex(va_end)}")
+        # print(f"pa_start: {hex(pa_start)}")
+
+        logger.info(f"Final allocation: VA=PA=0x{va_start:x}-0x{va_end:x}, size=0x{size:x}")
         
-        # Now we need to check if this region is already mapped in the page tables
-        # If it's not mapped, we'll need to create the mapping
+        # Since we selected our allocation from within the selected_page boundaries,
+        # the only overlapping page is the one we started with
+        overlapping_pages = [selected_page]
         
-        page_entries = mmu.get_pages()
-        
-        overlapping_pages = []
-        for page in page_entries:
-            if (page.va <= va_end and page.end_va >= va_start):
-                overlapping_pages.append(page)
-                
-                # Check if the page has VA=PA mapping
-                if page.va != page.pa:
-                    logger.error(f"Existing page mapping doesn't satisfy VA=PA: VA=0x{page.va:x}, PA=0x{page.pa:x}")
-                    raise ValueError(f"Existing page mapping doesn't satisfy VA=PA: VA=0x{page.va:x}, PA=0x{page.pa:x}")
-        
-        # If no existing pages cover this region, create the mapping
-        if not overlapping_pages:
-            # We need to create the mapping from scratch
-            logger.info(f"Creating new VA=PA mapping at 0x{va_start:x}")
-            # Create pages as needed to cover the entire region
-            current_va = va_start
-            current_pa = pa_start
-            remaining_size = size
-            
-            while remaining_size > 0:
-                # Calculate the size for this page
-                current_page_size = min(page_size, remaining_size)
-                
-                # Map the VA to the PA with VA=PA
-                # THIS NEEDS TO CALL THE LOCAL map_va_to_pa METHOD, NOT page_table_manager's
-                self.map_va_to_pa(mmu, current_va, current_pa, current_page_size, page_type)
-                
-                # Move to the next page
-                current_va += current_page_size
-                current_pa += current_page_size
-                remaining_size -= current_page_size
-                
-            # Fetch the newly created pages
-            page_entries = mmu.get_page_table_entries()
-            overlapping_pages = []
-            for page in page_entries:
-                if (page.va <= va_end and page.end_va >= va_start):
-                    overlapping_pages.append(page)
-                    
         return va_start, pa_start, overlapping_pages
 
 
